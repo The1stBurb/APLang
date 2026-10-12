@@ -3,4 +3,3 @@ var a = 10;
 var b = [0, 1, 'sad'];
 a = 20;
 b[0] = fish(10, '32');
-eat more chicken
