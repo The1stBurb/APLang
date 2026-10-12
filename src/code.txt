@@ -1,0 +1,5 @@
+sample(10, 32, [20, 40, 'asd'], false);
+var a = 10;
+var b = [0, 1, 'sad'];
+a = 20;
+b[0] = fish(10, '32');
