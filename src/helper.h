@@ -26,3 +26,17 @@ float lerp(float a, float b, float t) {
 	else if (t > 1) { return b; }
 	return a + (b - a) * t;
 }
+
+std::string to_raw(const std::string& input) {
+	std::string raw;
+	for (char c : input) {
+		switch (c) {
+		case '\n': raw += "\\n"; break;
+		case '\r': raw += "\\r"; break;
+		case '\t': raw += "\\t"; break;
+		case '\\': raw += "\\\\"; break;
+		default:   raw += c;    break;
+		}
+	}
+	return raw;
+}
