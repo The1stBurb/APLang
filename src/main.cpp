@@ -11,9 +11,12 @@ int main() {
 	//print("hellow world");
 	string Data = readFile();
 
-	vector<LINE> lines = readData(Data);
+	vector<Chunk> lines = readData(Data);
+	print(Data);
 
-	cout << (string)lines[0] << endl;
+	for (int i = 0; i < lines.size(); i++) {
+		cout << (string)lines[i] << endl;
+	}
 
 	return 0;
 }

@@ -7,6 +7,7 @@
 #include <vector>
 #include <cctype>
 #include <format>
+#include <variant>
 
 #include "./helper.h"
 
@@ -34,6 +35,7 @@ public:
 	string data;
 
 	ELM(string Type, string Data) : type(Type), data(Data) {}
+	ELM(string Type, char Data) : type(Type), data(string(1, Data)) {}
 
 	void append(string Data) {
 		data += Data;
@@ -50,14 +52,17 @@ public:
 		return append(string(1,Data), Type);
 	}
 
+	bool append(ELM Elm) {
+		return append(Elm.data, Elm.type);
+	}
+
 	operator string() const {
-		return format("({}: {})", type, to_raw(data));
+		return format("{}:'{}'", type, to_raw(data));
 	}
 };
-
 class LINE {
 public:
-	vector<ELM> data;
+	vector<variant<ELM, LINE>> data;
 
 	LINE() : data({}) {}
 
@@ -67,21 +72,29 @@ public:
 	void append(ELM elm) {
 		data.push_back(elm);
 	}
-	void append(string Data, string Type) {
+	bool append(string Data, string Type) {
 		data.push_back(ELM(Type, Data));
+		return true;
 	}
-	void append(char Data, string Type) {
+	bool append(char Data, string Type) {
 		data.push_back(ELM(Type, string(1, Data)));
+		return true;
+	}
+	void append(LINE line) {
+		data.push_back(line);
 	}
 
-	ELM& top() {
+	auto& top() {
 		return data[size() - 1];
 	}
 
 	operator string() const {
 		string s = "[";
 		for (int i = 0; i < data.size(); i++) {
-			s += (string)data[i] + ", ";
+			visit([&](const auto& element) {
+				s += (string)element + ", ";
+			}, data[i]);
+			//s += (string)data[i] + ", ";
 		}
 		return s + "]";
 	}
@@ -103,6 +116,7 @@ string charType(char ch) {
 
 	else if (ch == '"') return "quote";
 	else if (ch == '\'')return "squote";
+
 	else if (ch == '=') return "eq";
 	else if (ch == '+') return "plus";
 	else if (ch == '-') return "minus";
@@ -116,18 +130,31 @@ string charType(char ch) {
 
 	return "none";
 }
+string beginChars = "([{'\"";
+char endBegins(char ch) {
+	if (ch == '(') return ')';
+	else if (ch == '[') return ']';
+	else if (ch == '{') return '}';
+	else if (ch == '\'') return '\'';
+	else if (ch == '"') return '"';
+
+	return '0';
+}
 
 
-class CHUNK {
+class CHUNKOLD {
 public:
 	char endChar;
+	string endType;
+
 	int& pos;
 	string data;
 	char& tok;
+
 	LINE line;
 	bool stop = false;
 
-	CHUNK(string Data, int& Pos, char EndChar) : data(Data), pos(Pos), endChar(EndChar), tok(data[pos]) {}
+	CHUNKOLD(string Data, int& Pos, char EndChar) : data(Data), pos(Pos), endChar(EndChar), endType(charType(EndChar)), tok(data[pos]) {}
 
 	void move() { pos++; }
 	char currentToken() { tok = (data[pos]); return tok; }
@@ -136,19 +163,37 @@ public:
 		currentToken();
 
 		string type = charType(tok);
-		print(type, tok, pos);
+		//print(type, tok, pos);
 
 		if (tok == endChar) {
 			stop = !false;
+			move();
+			return;
+		}
+
+		if (
+			(type == "newline" || type == "space") && !(endType == "squote" || endType == "quote")
+			) {
+			move();
 			return;
 		}
 
 		if (line.size() == 0) {
 			line.append(tok, type);
 		}
+		else if (beginChars.find(tok) != string::npos) {
+			CHUNKOLD tchunk(data, pos, endBegins(tok));
+			tchunk.main();
+			line.append(tchunk.line);
+			return;
+		}
 		else {
-			ELM& elm = line.top();
-			if (!elm.append(tok, type)) { line.append(tok, type); }
+			auto& elm = line.top();
+			bool res = false;
+			visit([&](auto& element) {
+				res = element.append(tok, type);
+			}, elm);
+			if (!res) { line.append(tok, type); }
 		}
 
 		move();
@@ -158,7 +203,7 @@ public:
 		while (!stop && pos < data.size()) {
 			mainStep();
 		}
-		pos++;
+		//pos--;
 	}
 
 	operator string() const {
@@ -166,13 +211,160 @@ public:
 	}
 };
 
-vector<LINE> readData(const string& data) {
+vector<LINE> readDataOld(const string& data) {
 	int pos = 0;
 	vector<LINE> lines;
-	CHUNK chunk(data, pos, ';');
 	while (pos < data.size()) {
+		CHUNKOLD chunk(data, pos, ';');
 		chunk.main();
+		lines.push_back(chunk.line);
 	}
-	lines.push_back(chunk.line);
 	return lines;
+}
+
+class Chunk {
+public:
+	vector<variant<ELM, Chunk>> data;
+	string type;
+
+	Chunk(string Type) : type(Type), data({}) {}
+
+	void append(char Data) {
+		append(ELM(charType(Data), Data));
+	}
+	void append(string Data, string Type) {
+		append(ELM(Type, Data));
+	}
+	void append(ELM elm) {
+		if (data.size() == 0) { data.push_back(elm); }
+		else {
+			auto& telm = top();
+			if (holds_alternative<ELM>(telm)) {
+				bool res = get<ELM>(telm).append(elm);
+				if (!res) { data.push_back(elm); }
+			}
+			else if (holds_alternative<Chunk>(telm)) {
+				data.push_back(elm);
+			}
+			else {
+				data.push_back(elm);
+			}
+		}
+	}
+	void append(Chunk chunk) {
+		data.push_back(chunk);
+	}
+
+	variant<ELM, Chunk>& top() {
+		return data[data.size() - 1];
+	}
+	operator string() const {
+		string s = "";
+		for (int i = 0; i < data.size(); i++) {
+			variant<ELM, Chunk> d = data[i];
+			s += (holds_alternative<ELM>(d) ? (string)get<ELM>(d) : (string)get<Chunk>(d)) + ", ";
+		}
+		return format("{}:[{}]", type, s);
+	}
+};
+
+
+Chunk readDecide(const string& data, int& pos, char type);
+
+Chunk readSemicolon(const string& data, int& pos) {
+	Chunk ch("Semicolon");
+	while (pos < data.size()) {
+		char tok = data[pos++];
+		if (tok == ';') break;
+		else if (beginChars.find(tok) != string::npos) {
+			char end = endBegins(tok);
+			Chunk res = readDecide(data, pos, end);
+			ch.append(res);
+		}
+		else {
+			ch.append(tok);
+		}
+	}
+	return ch;
+}
+Chunk readPara(const string& data, int& pos) {
+	Chunk ch("Para");
+	while (pos < data.size()) {
+		char tok = data[pos++];
+		if (tok == ')') break;
+		else if (beginChars.find(tok) != string::npos) {
+			char end = endBegins(tok);
+			Chunk res = readDecide(data, pos, end);
+			ch.append(res);
+		}
+		else {
+			ch.append(tok);
+		}
+	}
+	return ch;
+}
+Chunk readBrace(const string& data, int& pos) {
+	Chunk ch("Brace");
+	while (pos < data.size()) {
+		char tok = data[pos++];
+		if (tok == '}') break;
+		else if (beginChars.find(tok) != string::npos) {
+			char end = endBegins(tok);
+			Chunk res = readDecide(data, pos, end);
+			ch.append(res);
+		}
+		else {
+			ch.append(tok);
+		}
+	}
+	return ch;
+}
+Chunk readBrack(const string& data, int& pos) {
+	Chunk ch("Brack");
+	while (pos < data.size()) {
+		char tok = data[pos++];
+		if (tok == ']') break;
+		else if (beginChars.find(tok) != string::npos) {
+			char end = endBegins(tok);
+			Chunk res = readDecide(data, pos, end);
+			ch.append(res);
+		}
+		else {
+			ch.append(tok);
+		}
+	}
+	return ch;
+}
+Chunk readStringS(const string& data, int& pos) {
+	Chunk ch("StringS");
+	while (pos < data.size()) {
+		char tok = data[pos++];
+		if (tok == '\'') break;
+		else {
+			ch.append(tok);
+		}
+	}
+	return ch;
+}
+
+Chunk readDecide(const string& data, int& pos, char type) {
+	if (type == ';')return readSemicolon(data, pos);
+	else if (type == ')')return readPara(data, pos);
+	else if (type == '}')return readBrace(data, pos);
+	else if (type == ']')return readBrack(data, pos);
+	else if (type == '\'')return readStringS(data, pos);
+	return Chunk("Oopsie!");
+}
+
+
+vector<Chunk> readData(const string& data) {
+	int pos = 0;
+	vector<Chunk> chunks = {};
+
+	while (pos < data.size()) {
+		Chunk res = readSemicolon(data, pos);
+		chunks.push_back(res);
+	}
+
+	return chunks;
 }
